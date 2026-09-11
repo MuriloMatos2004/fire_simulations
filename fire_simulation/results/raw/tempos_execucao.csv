@@ -1,0 +1,10 @@
+carga,versao,politica,tempo_segundos
+pequena,sequencial,none,0.384451
+pequena,paralelo,dynamic,512,0.103384
+pequena,paralelo,guided,512,0.121679
+media,sequencial,none,4.338890
+media,paralelo,dynamic,512,0.687006
+media,paralelo,guided,512,0.677979
+grande,sequencial,none,15.028609
+grande,paralelo,dynamic,512,2.460469
+grande,paralelo,guided,512,2.374786

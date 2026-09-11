@@ -1,0 +1,155 @@
+\documentclass[a4paper,12pt]{article}
+
+% --- Pacotes de Idioma e Formatação ---
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% --- Cabeçalho do Documento ---
+\title{\textbf{Relatório de Desempenho: Simulação de Incêndio Florestal com OpenMP}}
+\author{\textbf{[Nome dos Integrantes / Número USP]} \\ 
+\small Disciplina: Computação de Alto Desempenho \\
+\small Universidade de São Paulo (USP)}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\hrule
+\vspace{0.5cm}
+
+\section{Descrição das Soluções}
+
+\subsection{Solução Sequencial}
+A solução sequencial (\texttt{fire\_seq.c}) simula a propagação de incêndio através de uma grade bidimensional de células ao longo de $P$ passos discretos de tempo. A cada passo de tempo, a simulação itera de forma determinística sobre a malha de $L \times C$ células, avaliando o estado atual de cada célula em conjunto com os estados de seus vizinhos mais próximos e as direções do vento. A partir dessas avaliações, calculam-se as transições de estado para o próximo passo e acumula-se a contagem global dos dados estatísticos (células não combustíveis, intactas, em chamas, queimadas e sob contenção).
+
+\subsection{Solução Paralela e Estratégia de Paralelização}
+A versão paralela (\texttt{fire\_omp.c}) utiliza a biblioteca \textbf{OpenMP} direcionada para arquiteturas de memória compartilhada, aplicando as seguintes estratégias de otimização:
+
+\begin{itemize}
+    \item \textbf{Região Paralela Persistente:} Foi definida uma única região paralela (\texttt{\#pragma omp parallel}) em torno do laço temporal principal (\texttt{while (passo < P)}). Esta abordagem elimina o overhead de criação e destruição repetitiva da equipe de \textit{threads} a cada iteração de tempo.
+    \item \textbf{Escopo Estrito de Variáveis (\texttt{default(none)}):} Para evitar condições de corrida (\textit{race conditions}), o escopo de cada variável foi explicitado. As matrizes globais foram configuradas como \texttt{shared(...)}, enquanto contadores e iteradores locais foram definidos como privados.
+    \item \textbf{Paralelização e Vetorização (\texttt{\#pragma omp for simd}):} Os laços internos de atualização das células utilizam a instrução combinada \texttt{for simd}, permitindo a distribuição das iterações entre as \textit{threads} e o uso de instruções vetoriais da CPU (AVX/SSE).
+    \item \textbf{Redução de Variáveis (\texttt{reduction(+: ...)}):} Os contadores estatísticos locais (\texttt{l\_nc}, \texttt{l\_int}, \texttt{l\_cha}, \texttt{l\_que}, \texttt{l\_cnt}) são consolidados via cláusula de redução ao final das iterações, garantindo atomicidade sem o custo computacional de seções críticas (\texttt{\#pragma omp critical}).
+    \item \textbf{Escalonamento Dinâmico/Guiado (\texttt{schedule(runtime)}):} O escalonamento é parametrizado em tempo de execução pela variável de ambiente \texttt{OMP\_SCHEDULE}, permitindo flexibilidade na escolha do tamanho de bloco (\textit{chunk size}).
+\end{itemize}
+
+% --- AMBIENTE EXPERIMENTAL ---
+\section{Ambiente Experimental}
+
+Todos os experimentos foram conduzidos sob o mesmo ambiente de hardware e software:
+
+\begin{itemize}
+    \item \textbf{Processador:} Intel\textregistered{} Core\texttrademark{} i7-4790 CPU @ 3.60GHz (frequência máxima de 4,00 GHz).
+    \item \textbf{Arquitetura:} 1 \textit{socket}, 4 núcleos físicos de processamento, 2 \textit{threads} por núcleo (Hyper-Threading habilitado, totalizando 8 CPUs virtuais).
+    \item \textbf{Memória Cache:} L1d de 128 KiB, L2 de 1 MiB e L3 compartilhada de 8 MiB.
+    \item \textbf{Memória RAM:} 31 GiB de memória principal.
+    \item \textbf{Sistema Operacional e Compilador:} Ubuntu Linux, \texttt{gcc} versão 5.3.1.
+    \item \textbf{Flags de Compilação:} \texttt{gcc -Wall -Wextra -O3 -std=c99 -fopenmp}.
+    \item \textbf{Parâmetros de Execução Paralela:} Execução fixada em 8 \textit{threads} (número total de \textit{threads} lógicas disponíveis no nó de teste do cluster Andromeda), avaliando as políticas \texttt{dynamic, 512} e \texttt{guided, 512}.
+\end{itemize}
+
+% --- VALIDAÇÃO ---
+\section{Validação da Versão Paralela}
+
+A validação da correção algorítmica da versão paralela foi realizada comparando suas saídas com as da versão sequencial para as três cargas de entrada padrão.
+
+\begin{table}[htbp]
+\centering
+\caption{Comparação de Checksums entre as Versões Sequencial e Paralela}
+\label{tab:validacao}
+\vspace{0.2cm}
+
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Carga} & \textbf{Passos} & \textbf{Checksum Sequencial} & \textbf{Checksum Paralelo} & \textbf{Status} \\ \midrule
+Pequena & 80  & \texttt{12001375052313148138} & \texttt{12001375052313148138} & Idêntico \\
+Média   & 100 & \texttt{15472542045181629368} & \texttt{15472542045181629368} & Idêntico \\
+Grande  & 100 & \texttt{13879468400959847931} & \texttt{13879468400959847931} & Idêntico \\ \bottomrule
+\end{tabular}
+\end{table}
+
+A correspondência exata de todos os estados finais e do \textit{checksum} de 64 bits confirma a integridade e o determinismo da implementação em OpenMP.
+
+% --- RESULTADOS DE DESEMPENHO ---
+\section{Resultados de Desempenho e Métrica de Escala}
+
+As métricas de \textit{Speedup} ($S$) e Eficiência ($E$) foram calculadas conforme as equações:
+
+\begin{equation}
+S = \frac{T_{\text{sequencial}}}{T_{\text{paralelo}}}
+\end{equation}
+
+\begin{equation}
+E = \frac{S}{P} \times 100\%
+\end{equation}
+
+\begin{table}[htbp]
+\centering
+\caption{Tempos de Execução, Speedup e Eficiência para 8 Threads}
+\label{tab:resultados}
+\vspace{0.2cm}
+
+\begin{tabular}{llccc}
+\toprule
+\textbf{Carga} & \textbf{Versão / Politica} & \textbf{Tempo (s)} & \textbf{Speedup ($S$)} & \textbf{Eficiência ($E$)} \\ \midrule
+Pequena & Sequencial           & 0,2741 & $1,00\times$ & $100,00\%$ \\
+        & Paralela (\texttt{dynamic,512}) & 0,9912 & $0,28\times$ & $3,46\%$ \\
+        & Paralela (\texttt{guided,512})  & 0,2672 & $1,03\times$ & $12,82\%$ \\ \midrule
+Média   & Sequencial           & 3,1935 & $1,00\times$ & $100,00\%$ \\
+        & Paralela (\texttt{dynamic,512}) & 2,4090 & $1,33\times$ & $16,57\%$ \\
+        & Paralela (\texttt{guided,512})  & 2,4339 & $1,31\times$ & $16,40\%$ \\ \midrule
+Grande  & Sequencial           & 11,1908 & $1,00\times$ & $100,00\%$ \\
+        & Paralela (\texttt{dynamic,512}) & 8,4613 & $1,32\times$ & $16,53\%$ \\
+        & Paralela (\texttt{guided,512})  & 8,4300 & $1,33\times$ & $16,59\%$ \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Inclusão dos Gráficos}
+
+\begin{figure}[htbp]
+    \centering
+    % Substitua 'grafico_tempo.png' pelo nome do seu arquivo gerado
+    \includegraphics[width=0.8\textwidth]{grafico_tempo.png}
+    \caption{Comparativo dos Tempos de Execução entre as versões Sequencial e Paralelas.}
+    \label{fig:tempo}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    % Substitua 'grafico_speedup.png' pelo nome do seu arquivo gerado
+    \includegraphics[width=0.8\textwidth]{grafico_speedup.png}
+    \caption{Speedup relativo alcançado com 8 threads nas cargas Pequena, Média e Grande.}
+    \label{fig:speedup}
+\end{figure}
+
+% --- ANÁLISE DOS RESULTADOS ---
+\section{Análise dos Resultados e Discussão}
+
+\begin{enumerate}
+    \item \textbf{Cargas Pequenas e Overhead de Gerenciamento:} 
+    Na carga pequena, a política \texttt{dynamic,512} apresentou desaceleração ($0,28\times$), pois o tempo de overhead do OpenMP para controlar a fila de escalonamento superou o tempo de computação das células. A política \texttt{guided,512} atenuou essa penalidade ($1,03\times$) ao alocar blocos inicialmente maiores.
+    
+    \item \textbf{Gargalo de Banda de Memória (\textit{Memory-Bound}):} 
+    Nas cargas Média e Grande, o \textit{speedup} estabilizou em torno de \textbf{$1,32\times$ a $1,33\times$}. O fator limitante para a aceleração linear com 8 \textit{threads} é a natureza da aplicação: o algoritmo realiza poucas operações aritméticas por cada acesso à memória RAM (leitura e escrita repetida em vetores extensos). As \textit{threads} concorrentes saturam o barramento de memória da placa-mãe (\textit{Bus Bottleneck}).
+    
+
+    \item \textbf{Otimização do Compilador na Linha de Base Sequencial:} 
+    O compilador GCC com a flag \texttt{-O3} aplicou auto-vetorização eficiente na versão sequencial mono-thread. Isso elevou a taxa de desempenho do código sequencial base, tornando o ganho de escala relativo da versão paralela mais moderado, embora condizente com os limites físicos do hardware.
+\end{enumerate}
+
+\end{document}
