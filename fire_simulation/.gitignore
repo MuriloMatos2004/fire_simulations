@@ -1,0 +1,4 @@
+*.o
+fire_seq
+fire_omp
+results/raw/*.txt
